@@ -6,6 +6,7 @@ import { pixelate } from './pixel';
 import { paletteFromRaw } from './palette';
 import { MAX_ANIMATION_PIXELS, validateSheet, type SheetSpec, type MotionSpec } from './animation-types';
 import { dimensions, type Job } from './types';
+import { alignCharacter, measureSprite, scaleLock, type SpriteBounds } from './character-scale';
 
 export async function splitSheet(source: Buffer, spec: SheetSpec): Promise<Buffer[]> {
   const s = validateSheet(spec);
@@ -28,13 +29,18 @@ export async function packFrames(frames: Buffer[], width: number, height: number
   return sharp({create:{width:columns * width,height:Math.ceil(frames.length/columns)*height,channels:4,background:'#00000000'}})
     .composite(frames.map((input,i) => ({input,left:(i%columns)*width,top:Math.floor(i/columns)*height}))).png().toBuffer();
 }
-export async function finishAnimation(job: Job, source: Buffer, spec: SheetSpec, motion?: MotionSpec) {
+export async function finishAnimation(job: Job, source: Buffer, spec: SheetSpec, motion?: MotionSpec, reference?: SpriteBounds) {
   const dir = jobDir(job.id); await mkdir(dir,{recursive:true});
   await writeFile(path.join(dir,'original.png'),source);
   job.original = 'original.png'; job.status = 'processing'; await saveJob(job);
   const {width,height} = dimensions(job.settings);
-  if (width * height * spec.count > MAX_ANIMATION_PIXELS) throw new Error('변환 후 전체 프레임은 1,677만 픽셀 이하로 설정해 주세요.');
+  if (width * height * (spec.count-(motion?.lockScale&&reference?1:0)) > MAX_ANIMATION_PIXELS) throw new Error('변환 후 전체 프레임은 1,677만 픽셀 이하로 설정해 주세요.');
   const frames = await splitSheet(source,spec);
+  if (motion?.lockScale && reference) {
+    const calibration = frames.shift()!;
+    await writeFile(path.join(dir,'calibration.png'),calibration);
+    job.scaleLock = scaleLock(reference, (await measureSprite(calibration)).bounds, width, height);
+  }
   const raw = await sharp(source).ensureAlpha().raw().toBuffer();
   const palette = job.settings.palette ?? paletteFromRaw(raw,job.settings.colors);
   const settings = {...job.settings,width,height,size:Math.max(width,height),padding:0,exportSet:'selected' as const,framing:'canvas' as const,palette:palette.length >= 2 ? palette : undefined};
@@ -43,7 +49,11 @@ export async function finishAnimation(job: Job, source: Buffer, spec: SheetSpec,
     const stats = await sharp(frames[i]).ensureAlpha().stats();
     let png: Buffer;
     if (stats.channels[3].max < 128) { png = await sharp({create:{width,height,channels:4,background:'#00000000'}}).png().toBuffer(); warnings.push(`프레임 ${i+1}: 빈 프레임`); }
-    else { png = (await pixelate(frames[i],settings)).outputs[0].png; }
+    else {
+      const aligned = job.scaleLock ? await alignCharacter(frames[i],job.scaleLock) : undefined;
+      if (aligned?.clipped) warnings.push(`프레임 ${i+1}: 기준 몸 크기를 유지하면 일부가 캔버스 밖으로 나갑니다. 더 큰 프레임 영역이 필요합니다.`);
+      png = (await pixelate(aligned?.png ?? frames[i],settings)).outputs[0].png;
+    }
     processed.push(png);
     await writeFile(path.join(dir,`frame-${i}.png`),png);
   }

@@ -18,12 +18,13 @@ export async function POST(request: Request) {
     if (await readJob(id).catch(() => null)) throw new Error('이미 제출한 변환 작업입니다.');
     if (activeJob()) return NextResponse.json({ error: '현재 작업 완료 후 변환해 주세요.' }, { status: 409 });
     acquire(id); locked = true;
-    let original: Buffer, prompt = '업로드 이미지', source: string | undefined;
+    let original: Buffer, normalized: Buffer | undefined, prompt = '업로드 이미지', source: string | undefined;
     const sourceId = form.get('sourceId');
     if (sourceId) {
       const previous = await readJob(String(sourceId));
       if (!previous.original) throw new Error('저장된 원본이 없습니다.');
       original = await readFile(path.join(jobDir(previous.id), 'original.png'));
+      if(previous.normalized==='normalized.png') { normalized=await readFile(path.join(jobDir(previous.id),'normalized.png')); settings.framing='canvas'; }
       prompt = previous.prompt; source = previous.id;
     } else {
       const file = form.get('image');
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
     }
     job = { id, created: new Date().toISOString(), prompt, model: 'local', quality: 'local', settings, status: 'processing', variants: [], source };
     await saveJob(job);
-    return NextResponse.json(await finishJob(job, original));
+    return NextResponse.json(await finishJob(job, original, normalized));
   } catch (error) {
     const message = error instanceof Error && !error.message.includes('Input') ? error.message : '이미지를 처리하지 못했습니다. 파일 형식과 크기를 확인해 주세요.';
     if (job) { job.status = 'failed'; job.error = message; await saveJob(job).catch(() => {}); }

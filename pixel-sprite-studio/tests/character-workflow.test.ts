@@ -65,7 +65,7 @@ test('all requested character actions reach the edit route with the front refere
     const form = init!.body as FormData, prompt = String(form.get('prompt'));
     const image = [...form.entries()].find(([key]) => key.startsWith('image'))![1] as File;
     calls.push({ prompt, image: new Uint8Array(await image.arrayBuffer()) });
-    const count = Number(prompt.match(/Exactly (\d+) different/)![1]), layout = motionLayout(count);
+    const count = Number(prompt.match(/Grid occupied cells: (\d+)/)![1]), layout = motionLayout(count);
     const sheet = await sharp({ create: { width: layout.columns * 16, height: layout.rows * 24, channels: 4, background: '#00000000' } }).composite(await Promise.all(Array.from({ length: count }, async (_, i) => ({ input: await fixture(i % 3), left: i % layout.columns * 16, top: Math.floor(i / layout.columns) * 24 })))).png().toBuffer();
     return new Response(JSON.stringify({ data: [{ b64_json: sheet.toString('base64') }], usage: { input_tokens: 110, input_tokens_details: { text_tokens: 10, image_tokens: 100 }, output_tokens: 100 } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   };
@@ -79,7 +79,7 @@ test('all requested character actions reach the edit route with the front refere
       assert.equal(response.status, 200, JSON.stringify(job)); assert.equal(job.animation.frames.length, motion.frames); assert.equal(job.animation.motion.direction, motion.direction); assert.ok(job.cost);
       assert.deepEqual(await readFile(path.join(jobDir(id), 'reference.png')), front);
     }
-    assert.equal(calls.length, 10); for (const call of calls) { assert.match(call.prompt, /FRONT/); assert.deepEqual(Buffer.from(call.image), front); }
+    assert.equal(calls.length, 10); for (const [i,call] of calls.entries()) { assert.match(call.prompt, /FRONT/); assert.match(call.prompt,/CELL 0 IS A SCALE CALIBRATION/); assert.ok(Buffer.from(call.image).equals(await readFile(path.join(jobDir(created[i]),'reference-guide.png')))); }
     const clip: Clip = { id: 'test', name: 'mine_down', width: 16, height: 24, fps: 8, loop: true, frames: [0, 1, 2].map(index => ({ jobId: created.at(-1)!, index, x: 0, y: 0, duration: 125 })) };
     for (const [format, mime] of [['zip', 'application/zip'], ['aseprite', 'application/octet-stream'], ['png', 'image/png'], ['gif', 'image/gif'], ['frames', 'application/zip'], ['frame', 'image/png']]) {
       const response = await download(new Request('http://127.0.0.1:3216/api/animation/export', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ clips: [clip], format, frame: 1 }) }));

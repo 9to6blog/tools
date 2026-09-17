@@ -23,6 +23,8 @@ export type Job = {
   referencePrompt?: string;
   cost?: import('./pricing').Cost;
   animation?: import('./animation-types').AnimationInfo;
+  scaleLock?: import('./character-scale').ScaleLock;
+  normalized?: string;
   kind?: 'image' | 'reference' | 'edit' | 'motion' | 'sheet';
 };
 export const DEFAULT_SETTINGS: PixelSettings = { size: 16, padding: 4, colors: 16, threshold: 30, sampling: 'dominant', removeWhite: false, exportSet: 'selected', framing: 'trim' };

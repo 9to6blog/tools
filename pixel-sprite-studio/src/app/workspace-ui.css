@@ -1,4 +1,7 @@
 html{scroll-padding-top:100px}
+.draft-status{font-size:11px;color:#9eb88b;margin:0 0 14px;line-height:1.7}
+.draft-status.draft-warning{color:#e4ba81}
+.playback-frame .reference-ghost{position:absolute;inset:0;opacity:.3;pointer-events:none;outline:1px dashed #bafa7a;mix-blend-mode:screen}
 .studio-shell .mode-switch{grid-template-columns:repeat(3,minmax(0,1fr))}
 footer a{color:#c3eba5;text-decoration:underline;text-underline-offset:3px;font-size:11px;letter-spacing:0}
 .character-intro{border:1px solid #476137;background:#23321c;border-radius:9px;padding:18px 20px;margin-bottom:20px}

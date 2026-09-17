@@ -1,6 +1,6 @@
 'use client';
 /* eslint-disable @next/next/no-img-element */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowDownToLine, ArrowRight, Box, Check, ChevronDown, Grid2X2, ImagePlus, KeyRound, Layers3, LoaderCircle, RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,8 @@ import { GenerationReferences } from '@/components/generation-references';
 import { CostEstimate, CostLedger, JobCost } from '@/components/cost-panel';
 import './animation.css';
 import { PrimaryActionProvider, HeaderPrimaryAction, usePrimaryAction } from '@/components/primary-action';
+import { useWorkspaceDraft, DraftStatus } from '@/components/use-workspace-draft';
+import { motionApiSize } from '@/lib/animation-types';
 import { OutputPresets } from '@/components/output-presets';
 import { DEFAULT_SETTINGS, MAX_EDGE, MAX_UPLOAD_BYTES, MODELS, dimensions, generationSize, validateSettings, variantDimensions, type Job, type PixelSettings, type Variant } from '@/lib/types';
 
@@ -71,7 +73,24 @@ function StudioWorkspace() {
   const selectedId = useRef<string | null>(null);
   const initialized = useRef(false);
   const upload = useRef<HTMLInputElement>(null);
-  const busy = working || !!active || extraWorking || readingReferences;
+  const draftFiles = useMemo(() => ({ file, references }), [file, references]);
+  const draft = useWorkspaceDraft('workspace', { mode, prompt, referencePrompt, editPrompt, settings, model, quality, fileSize, tileSize, tileCols, tileRows }, draftFiles, (data, saved) => {
+    if (['generate','upload','character'].includes(String(data.mode))) setMode(data.mode as 'generate' | 'upload' | 'character');
+    if (typeof data.prompt === 'string') setPrompt(data.prompt.slice(0,4000));
+    if (typeof data.referencePrompt === 'string') setReferencePrompt(data.referencePrompt.slice(0,2000));
+    if (typeof data.editPrompt === 'string') setEditPrompt(data.editPrompt.slice(0,4000));
+    if (MODELS.includes(data.model as typeof MODELS[number])) setModel(String(data.model));
+    if (['low','medium','high'].includes(String(data.quality))) setQuality(String(data.quality));
+    if (saved.file instanceof File) setFile(saved.file);
+    if (Array.isArray(saved.references)) setReferences(saved.references.slice(0,4));
+    const dimensions = data.fileSize as {width?:number;height?:number}|null;
+    if (dimensions && Number.isInteger(dimensions.width) && Number.isInteger(dimensions.height)) setFileSize(dimensions as {width:number;height:number});
+    if (typeof data.tileSize === 'number') setTileSize(data.tileSize);
+    if (typeof data.tileCols === 'number') setTileCols(data.tileCols);
+    if (typeof data.tileRows === 'number') setTileRows(data.tileRows);
+    if (data.settings) setSettings(validateSettings(data.settings));
+  });
+  const busy = !draft.ready || working || !!active || extraWorking || readingReferences;
   const target = dimensions(settings);
   const update = <K extends keyof PixelSettings>(key: K, value: PixelSettings[K]) => setSettings(s => ({ ...s, [key]: value }));
   const setDimensions = (width: number, height: number) => setSettings(s => ({ ...s, width, height, size: Math.max(width, height), padding: Math.max(width, height) + s.padding * 2 > MAX_EDGE ? 0 : s.padding }));
@@ -192,8 +211,9 @@ function StudioWorkspace() {
         <button disabled={busy} aria-pressed={mode === 'upload'} className={mode === 'upload' ? 'selected' : ''} onClick={() => { setMode('upload'); setError(''); }}><ImagePlus size={20} /><span><strong>내 컴퓨터 이미지 변환</strong><small>무료 픽셀 변환 · AI 시점 변경 별도</small></span></button>
         <button disabled={busy} aria-pressed={mode === 'character'} className={mode === 'character' ? 'selected' : ''} onClick={() => setMode('character')}><Layers3 size={20}/><span><strong>캐릭터 스프라이트</strong><small>정면 원본 → 방향별 모습 · 7가지 동작</small></span></button>
       </div>
+      <DraftStatus {...draft}/>
       <ArtControls settings={settings} onChange={setSettings} disabled={busy} file={mode === 'upload' ? file : null} sourceId={job?.id} sourceFile={variant?.file}/>
-      <div hidden={mode !== 'character'}><CharacterStudio active={mode === 'character'} jobs={jobs} settings={settings} apiKey={apiKey} setApiKey={setApiKey} hasKey={hasKey} model={model} setModel={setModel} quality={quality} setQuality={setQuality} refresh={refresh} serverBusy={working || !!active} onBusy={setExtraWorking}/></div>
+      <div hidden={mode !== 'character'}><CharacterStudio active={mode === 'character'} jobs={jobs} settings={settings} apiKey={apiKey} setApiKey={setApiKey} hasKey={hasKey} model={model} setModel={setModel} quality={quality} setQuality={setQuality} refresh={refresh} serverBusy={!draft.ready || working || !!active} onBusy={setExtraWorking}/></div>
       <div hidden={mode === 'character'}>
       <div className="workspace">
         <aside className="control-panel"><div className="panel-title">{mode === 'generate' ? <Sparkles size={17} /> : <ImagePlus size={17} />}<h2>{mode === 'generate' ? '새 그림 생성하기' : '로컬 파일 변환하기'}</h2><span>{mode === 'generate' ? 'API' : 'LOCAL'}</span></div>
@@ -218,7 +238,7 @@ function StudioWorkspace() {
           {(mode === 'generate' || mode === 'upload') && <div className="key-section"><button className="key-toggle" onClick={() => setKeyOpen(!keyOpen)}><span><KeyRound size={14} /> OpenAI API 키</span><span className="key-tag">{apiKey || hasKey ? '입력됨' : '연결 필요'}<ChevronDown size={13} /></span></button>{keyOpen && <div className="key-body"><Label htmlFor="apiKey" className="sr-only">OpenAI API 키</Label><div className="key-input-row"><Input id="apiKey" type="password" autoComplete="off" spellCheck={false} placeholder={hasKey ? '환경 변수의 키 사용 중' : 'sk-…'} value={apiKey} onChange={e => { setApiKey(e.target.value); setKeyStatus(''); }} disabled={busy} /><Button size="sm" variant="outline" onClick={checkKey} disabled={checking || busy || (!apiKey && !hasKey)}>{checking ? <LoaderCircle className="spin" size={14} /> : '확인'}</Button></div><p className="help">이 탭의 메모리에만 유지됩니다. 화면 새로고침 시 다시 입력해야 합니다.</p>{keyStatus && <p className="key-status" role="status">{keyStatus}</p>}</div>}</div>}
           {mode === 'generate' && <div className="generation-cost"><CostEstimate jobs={jobs} requests={[{ model, quality, apiSize: generationSize(settings), kind: references.length ? 'reference' : 'image', referenceCount: references.length }]} /></div>}
           <div className="generate-area"><Button className="generate-button" onClick={() => run(mode === 'generate' ? 'generate' : 'upload')} disabled={busy || readingFile || (mode === 'generate' ? !prompt.trim() : !file)}>{busy ? <LoaderCircle size={17} className="spin" /> : mode === 'generate' ? <Sparkles size={17} /> : <ImagePlus size={17} />}{busy ? '작업 진행 중' : mode === 'generate' ? references.length ? `레퍼런스 ${references.length}장으로 새 이미지 생성` : 'API로 새 이미지 생성' : '선택한 로컬 이미지 변환'}{!busy && <ArrowRight size={17} />}</Button><p>{mode === 'generate' ? '이미지 1장 생성 · OpenAI API 요금 발생' : '내 PC에서 변환 · API 호출 없음 · 무료'}</p>{error && <div role="alert" className="message error">{error}</div>}</div>
-          {mode === 'upload' && <div className="ai-edit-box"><Label htmlFor="editPrompt">AI로 시점·자세 변경</Label><Textarea id="editPrompt" value={editPrompt} maxLength={4000} onChange={e=>setEditPrompt(e.target.value)} disabled={busy}/><p className="help">위에서 선택한 카메라 시점·방향을 반영합니다. 선택한 파일을 OpenAI에 전송하며 1회 요금이 발생합니다.</p><CostEstimate jobs={jobs} requests={[{ model, quality, apiSize: generationSize(settings), kind: 'edit', referenceCount: 1 }]} /><Button variant="outline" disabled={busy || !file || !editPrompt.trim()} onClick={()=>run('edit')}>선택 이미지 시점·자세 변경 · 유료</Button></div>}
+          {mode === 'upload' && <div className="ai-edit-box"><Label htmlFor="editPrompt">AI로 시점·자세 변경</Label><Textarea id="editPrompt" value={editPrompt} maxLength={4000} onChange={e=>setEditPrompt(e.target.value)} disabled={busy}/><p className="help">원본의 몸 크기와 위치를 기준으로 자세를 변경합니다. 크기 기준 칸을 함께 생성한 뒤 결과 1장만 저장합니다. API 1회 요금이 발생합니다.</p><CostEstimate jobs={jobs} requests={[{ model, quality, apiSize: motionApiSize(target.width,target.height,1,true), kind: 'edit', referenceCount: 1 }]} /><Button variant="outline" disabled={busy || !file || !editPrompt.trim()} onClick={()=>run('edit')}>선택 이미지 시점·자세 변경 · 유료</Button></div>}
         </aside>
         <section className="preview-panel" aria-label="스프라이트 미리보기">
           <div className="preview-toolbar"><div className="preview-tabs"><button className={!showOriginal ? 'active' : ''} onClick={() => setShowOriginal(false)}><Grid2X2 size={15} /> 픽셀 결과</button><button disabled={!job?.original} className={showOriginal ? 'active' : ''} onClick={() => setShowOriginal(true)}>저장된 원본</button></div><div className="preview-tools"><button title="픽셀 격자 표시" aria-label="픽셀 격자 표시" disabled={zoom < 3} aria-pressed={grid} className={grid ? 'on' : ''} onClick={() => setGrid(!grid)}><Grid2X2 size={16} /></button><button aria-pressed={actualPixels} className={actualPixels ? 'on' : ''} onClick={() => setActualPixels(!actualPixels)}>{actualPixels ? '화면에 맞춤' : '1:1 보기'}</button><span className="mono">{showOriginal ? 'ORIGINAL' : `${Math.round(zoom * 100)}%`}</span></div></div>
