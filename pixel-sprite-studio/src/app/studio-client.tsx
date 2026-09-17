@@ -9,12 +9,13 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { ArtControls } from '@/components/art-controls';
-import { AnimationStudio } from '@/components/animation-studio';
-import { TileStudio } from '@/components/tile-studio';
+import { CharacterStudio } from '@/components/character-studio';
 import { GenerationReferences } from '@/components/generation-references';
 import { CostEstimate, CostLedger, JobCost } from '@/components/cost-panel';
 import './animation.css';
-import { DEFAULT_SETTINGS, MAX_EDGE, MAX_UPLOAD_BYTES, MODELS, SIZE_PRESETS, dimensions, generationSize, validateSettings, variantDimensions, type Job, type PixelSettings, type Variant } from '@/lib/types';
+import { PrimaryActionProvider, HeaderPrimaryAction, usePrimaryAction } from '@/components/primary-action';
+import { OutputPresets } from '@/components/output-presets';
+import { DEFAULT_SETTINGS, MAX_EDGE, MAX_UPLOAD_BYTES, MODELS, dimensions, generationSize, validateSettings, variantDimensions, type Job, type PixelSettings, type Variant } from '@/lib/types';
 
 const asset = (id: string, file: string, download = false) => `/api/assets/${id}/${file}${download ? '?download=1' : ''}`;
 const targetLabel = (s: PixelSettings) => { const d = dimensions(s); return `${d.width} × ${d.height}`; };
@@ -30,7 +31,10 @@ const prompts = [
 ];
 
 export default function Studio() {
-  const [mode, setMode] = useState<'generate' | 'upload' | 'motion' | 'sheet' | 'tiles'>('generate');
+  return <PrimaryActionProvider><StudioWorkspace /></PrimaryActionProvider>;
+}
+function StudioWorkspace() {
+  const [mode, setMode] = useState<'generate' | 'upload' | 'character'>('generate');
   const [extraWorking, setExtraWorking] = useState(false);
   const [editPrompt, setEditPrompt] = useState('캐릭터의 외형을 유지하고 선택한 시점·방향으로 바꿔 주세요.');
   const [settings, setSettings] = useState<PixelSettings>(DEFAULT_SETTINGS);
@@ -173,21 +177,24 @@ export default function Studio() {
   const zoom = actualPixels ? 1 : largest <= 352 ? Math.max(1, Math.floor(352 / largest)) : 352 / largest;
   const ready = !!variant && job?.status === 'complete';
   const tileValid = [tileSize, tileCols, tileRows].every(n => Number.isInteger(n) && n > 0) && tileSize * Math.max(tileCols, tileRows) <= MAX_EDGE;
+  usePrimaryAction(mode === 'generate' || mode === 'upload', {
+    label: mode === 'generate' ? '이미지 생성 · 유료' : '이미지 변환 · 무료',
+    detail: mode === 'generate' ? `${target.width} × ${target.height}px · ${references.length ? `레퍼런스 ${references.length}장` : '텍스트로 생성'}` : '내 컴퓨터에서 변환 · API 호출 없음',
+    disabled: busy || readingFile || (mode === 'generate' ? !prompt.trim() : !file),
+    error, run: () => run(mode === 'generate' ? 'generate' : 'upload'),
+  });
   return <div className="studio-shell">
-    <header className="topbar"><Link className="brand" href="/"><span className="brand-mark"><Grid2X2 size={20} /></span><span>pixel<span className="brand-light">studio</span><sup>LOCAL</sup></span></Link><div className="topbar-right"><span className="live-dot" /> 내 PC에서 실행 중 <span className="divider" /><span className="mono">1 — 4096 PX</span></div></header>
+    <header className="topbar"><Link className="brand" href="/"><span className="brand-mark"><Grid2X2 size={20} /></span><span>pixel<span className="brand-light">studio</span><sup>LOCAL</sup></span></Link><HeaderPrimaryAction busy={busy}/></header>
     <main>
       <div className="page-intro"><div><div className="eyebrow">A PIXEL FOR EVERY WORLD.</div><h1>아이템부터 커다란 건물까지.</h1><p>게임에 필요한 크기로 만들고, 원본에서 다시 변환하세요.</p></div><Badge variant="outline" className="engine-badge"><Sparkles size={13} /> GPT Image 2.5</Badge></div>
       <div className="mode-switch" aria-label="작업 방식">
         <button disabled={busy} aria-pressed={mode === 'generate'} className={mode === 'generate' ? 'selected' : ''} onClick={() => { setMode('generate'); setError(''); }}><Sparkles size={20} /><span><strong>API로 새로 생성</strong><small>설명을 입력해 새 그림 만들기 · 유료</small></span></button>
         <button disabled={busy} aria-pressed={mode === 'upload'} className={mode === 'upload' ? 'selected' : ''} onClick={() => { setMode('upload'); setError(''); }}><ImagePlus size={20} /><span><strong>내 컴퓨터 이미지 변환</strong><small>무료 픽셀 변환 · AI 시점 변경 별도</small></span></button>
-        <button disabled={busy} aria-pressed={mode === 'motion'} className={mode === 'motion' ? 'selected' : ''} onClick={() => setMode('motion')}><Sparkles size={20}/><span><strong>게임 모션 생성</strong><small>방향별 대기 · 이동 · 무기 액션</small></span></button>
-        <button disabled={busy} aria-pressed={mode === 'sheet'} className={mode === 'sheet' ? 'selected' : ''} onClick={() => setMode('sheet')}><Layers3 size={20}/><span><strong>시트 재생 · 내보내기</strong><small>GIF · Aseprite · Godot · RPG Maker</small></span></button>
-        <button disabled={busy} aria-pressed={mode === 'tiles'} className={mode === 'tiles' ? 'selected' : ''} onClick={() => setMode('tiles')}><Grid2X2 size={20}/><span><strong>타일셋 만들기</strong><small>한 칸 규격 · 오브젝트 묶기 · Godot</small></span></button>
+        <button disabled={busy} aria-pressed={mode === 'character'} className={mode === 'character' ? 'selected' : ''} onClick={() => setMode('character')}><Layers3 size={20}/><span><strong>캐릭터 스프라이트</strong><small>정면 원본 → 방향별 모습 · 7가지 동작</small></span></button>
       </div>
       <ArtControls settings={settings} onChange={setSettings} disabled={busy} file={mode === 'upload' ? file : null} sourceId={job?.id} sourceFile={variant?.file}/>
-      <div hidden={mode !== 'motion' && mode !== 'sheet'}><AnimationStudio tab={mode === 'sheet' ? 'sheet' : 'motion'} jobs={jobs} settings={settings} apiKey={apiKey} setApiKey={setApiKey} hasKey={hasKey} model={model} setModel={setModel} quality={quality} setQuality={setQuality} refresh={refresh} serverBusy={working || !!active} onBusy={setExtraWorking}/></div>
-      <div hidden={mode !== 'tiles'}><TileStudio jobs={jobs} settings={settings} apiKey={apiKey} setApiKey={setApiKey} hasKey={hasKey} model={model} setModel={setModel} quality={quality} refresh={refresh} serverBusy={working || !!active} onBusy={setExtraWorking}/></div>
-      <div hidden={mode === 'motion' || mode === 'sheet' || mode === 'tiles'}>
+      <div hidden={mode !== 'character'}><CharacterStudio active={mode === 'character'} jobs={jobs} settings={settings} apiKey={apiKey} setApiKey={setApiKey} hasKey={hasKey} model={model} setModel={setModel} quality={quality} setQuality={setQuality} refresh={refresh} serverBusy={working || !!active} onBusy={setExtraWorking}/></div>
+      <div hidden={mode === 'character'}>
       <div className="workspace">
         <aside className="control-panel"><div className="panel-title">{mode === 'generate' ? <Sparkles size={17} /> : <ImagePlus size={17} />}<h2>{mode === 'generate' ? '새 그림 생성하기' : '로컬 파일 변환하기'}</h2><span>{mode === 'generate' ? 'API' : 'LOCAL'}</span></div>
           <fieldset disabled={busy || readingFile} className="controls">
@@ -199,7 +206,7 @@ export default function Studio() {
               <p className="help">파일을 선택한 다음 아래 변환 버튼을 누르세요. 이미지가 OpenAI로 전송되지 않습니다.</p>
             </div>}
             {mode === 'generate' && <GenerationReferences files={references} onChange={setReferences} instruction={referencePrompt} onInstruction={setReferencePrompt} disabled={busy} onReading={setReadingReferences} />}
-            <div className="field"><Label htmlFor="sizePreset">출력 영역 프리셋 <span className="label-unit">px</span></Label><select id="sizePreset" value={target.width === target.height && SIZE_PRESETS.includes(target.width as typeof SIZE_PRESETS[number]) ? target.width : 'custom'} onChange={e => { if (e.target.value !== 'custom') setDimensions(Number(e.target.value), Number(e.target.value)); }}><option value="custom">사용자 지정 가로 × 세로</option>{SIZE_PRESETS.map(n => <option key={n} value={n}>{n} × {n}{n <= 64 ? ' · 아이템 / 캐릭터' : n <= 512 ? ' · 건물 / 오브젝트' : ' · 대형 자산'}</option>)}</select></div>
+            <OutputPresets settings={settings} onChange={setSettings}/>
             <div className="field-pair"><div className="field"><Label htmlFor="targetWidth">가로</Label><Input id="targetWidth" type="number" min={1} max={MAX_EDGE} value={target.width} onChange={e => setDimensions(Number(e.target.value), target.height)} /></div><div className="field"><Label htmlFor="targetHeight">세로</Label><Input id="targetHeight" type="number" min={1} max={MAX_EDGE} value={target.height} onChange={e => setDimensions(target.width, Number(e.target.value))} /></div></div>
             <details className="tile-calculator"><summary>타일 칸 수로 크기 계산 <ChevronDown size={14} /></summary><div className="tile-inputs"><div><Label htmlFor="tileSize">타일 px</Label><Input id="tileSize" type="number" min={1} max={4096} value={tileSize} onChange={e => setTileSize(Number(e.target.value))} /></div><div><Label htmlFor="tileCols">가로 칸</Label><Input id="tileCols" type="number" min={1} max={4096} value={tileCols} onChange={e => setTileCols(Number(e.target.value))} /></div><div><Label htmlFor="tileRows">세로 칸</Label><Input id="tileRows" type="number" min={1} max={4096} value={tileRows} onChange={e => setTileRows(Number(e.target.value))} /></div></div><Button type="button" size="sm" variant="outline" disabled={!tileValid} onClick={() => setSettings(s => ({ ...s, size: tileSize * Math.max(tileCols, tileRows), width: tileSize * tileCols, height: tileSize * tileRows, padding: 0, exportSet: 'selected' }))}>{tileSize * tileCols} × {tileSize * tileRows}px 적용 · 여백 0</Button><p className="help">전체 이미지의 크기를 계산합니다. 타일 분할이나 타일맵 생성 기능은 아닙니다.</p></details>
             <div className="field-pair"><div className="field"><Label htmlFor="padding">사방 여백</Label><div className="unit-input"><Input id="padding" type="number" min={0} max={128} value={settings.padding} onChange={e => update('padding', Number(e.target.value))} /><span>px</span></div></div><div className="field"><Label htmlFor="colors">최대 색상</Label><select id="colors" value={settings.colors} onChange={e => update('colors', Number(e.target.value))}>{[2, 4, 8, 12, 16, 24, 32, 48, 64, 128, 256].map(n => <option key={n} value={n}>{n}색</option>)}</select></div></div>
@@ -231,7 +238,7 @@ export default function Studio() {
       <section className="history"><div className="history-heading"><h2>작업 기록 <span>{jobs.length}</span></h2><Button variant="ghost" size="sm" onClick={refresh}><RefreshCw size={13} /> 새로고침</Button></div>{jobs.length ? <div className="history-grid">{jobs.filter(j=>!j.animation).slice(0, 10).map(item => <button disabled={busy} className={`history-item ${job?.id === item.id ? 'current' : ''}`} key={item.id} onClick={() => selectJob(item)}><span className="history-thumb checker">{item.status === 'complete' ? <img src={asset(item.id, initialFile(item))} alt="" /> : <Box size={20} />}</span><span className="history-text"><strong>{item.prompt}</strong><small>{targetLabel(item.settings)}px · {item.model === 'local' ? item.source ? '원본 재변환' : '로컬 파일' : 'API 생성'} · {item.status === 'complete' ? '완료' : item.status === 'failed' ? '실패' : active === item.id ? '진행 중' : '응답 확인 필요'}</small></span></button>)}</div> : <div className="history-empty"><Layers3 size={16} /> 원본과 결과는 PC에 저장되며 새로고침 후에도 다시 열 수 있어요.</div>}</section>
       </div>
       <CostLedger jobs={jobs} />
-      <footer><span>PIXEL STUDIO · BUILD YOUR WORLD</span><span>로컬 저장 · 원본 보존 · 무료 재변환</span></footer>
+      <footer><span>PIXEL STUDIO · 개발자 <a href="https://9to6blog.com" target="_blank" rel="noopener noreferrer">9to6blog.com ↗</a></span><span>로컬 저장 · 원본 보존 · 무료 재변환</span></footer>
     </main>
   </div>;
 }

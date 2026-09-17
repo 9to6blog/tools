@@ -53,6 +53,6 @@ export async function finishAnimation(job: Job, source: Buffer, spec: SheetSpec,
   job.animation = {name:spec.name,width,height,fps:spec.fps,loop:spec.loop,columns,frames:processed.map((_,i)=>`frame-${i}.png`),palette,motion,warnings};
   job.variants = [{size:Math.max(width,height),canvas:Math.max(width,height),width,height,canvasWidth:width,canvasHeight:height,targetWidth:width,targetHeight:height,colors:palette.length,file:'frame-0.png'}];
   job.settings = settings; job.status = 'complete';
-  job.warning = [...warnings, ...(job.model !== 'local' ? ['AI의 셀 배치·자세 일관성은 결과를 확인해 주세요. 시트 탭에서 원본을 다시 분할할 수 있습니다.'] : [])].join(' ') || undefined;
+  job.warning = [...warnings, ...(job.model !== 'local' ? ['AI의 방향·셀 배치·자세 일관성은 프레임별로 확인해 주세요. 프레임 순서·시간·위치를 편집한 뒤 내보낼 수 있습니다.'] : [])].join(' ') || undefined;
   await saveJob(job); return job;
 }

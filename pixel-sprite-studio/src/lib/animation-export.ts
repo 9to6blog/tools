@@ -64,6 +64,8 @@ export async function exportAnimation(clips:Clip[],load:(jobId:string,index:numb
   const tres:string[]=[`[gd_resource type="SpriteFrames" load_steps=${flat.length+2} format=3]`,'','[ext_resource type="Texture2D" path="res://pixel_assets/sheet.png" id="1"]',''];
   let n=0;const godotAnimations:string[]=[];
   for(const {clip,pngs,raws} of rendered){
+    const clipColumns=Math.max(1,Math.min(Math.floor(4096/width),Math.ceil(Math.sqrt(pngs.length))));
+    zip[`pixel_assets/sheets/${clip.name}.png`]=await packFrames(pngs,width,height,clipColumns);
     const godotFrames:string[]=[],start=n;
     for(let i=0;i<pngs.length;i++,n++){
       const x=(n%cols)*width,y=Math.floor(n/cols)*height,name=`${clip.name}/${String(i).padStart(3,'0')}.png`;
@@ -93,5 +95,5 @@ export async function exportAnimation(clips:Clip[],load:(jobId:string,index:numb
     warnings.push('MZ 걷기는 방향별 프레임 0, floor(N/3), floor(2N/3)을 3패턴으로 배치했습니다. 가운데 패턴은 정지 자세로도 쓰이므로 편집기에서 순서를 확인하세요. 8방향과 공격 동작 실행은 별도의 게임 로직/플러그인이 필요합니다.');
   }
   zip['README_ko.txt']=strToU8(`Pixel Studio 애니메이션 내보내기\n\nGodot 4.7.2+: ZIP의 pixel_assets 폴더를 Godot 프로젝트 루트로 복사합니다. preview.tscn을 열거나 animations.tres를 AnimatedSprite2D의 Sprite Frames에 넣으세요. Nearest 필터, 발 기준 오프셋이 설정되어 있습니다. 폴더를 이동하면 Godot 편집기에서 경로를 갱신하세요. 동작 이름으로 play("walk_down")을 호출합니다. 이동·충돌·타격 판정은 게임 코드에서 연결합니다. hitFrame은 metadata.json에 저장됩니다.\n\nAseprite: character.aseprite에 Artwork 픽셀 레이어, 프레임별 시간, 동작별 태그가 들어 있습니다. 팔·머리 등 부위별 레이어 자동 분리는 아닙니다.\n\nPNG: sheet.png와 frames 폴더는 동일한 RGBA 픽셀입니다. 프레임 크기는 ${width}x${height}px이며 개별 프레임을 자동 확대/트리밍하지 않습니다. 수동 위치 이동 시 캔버스 밖 픽셀은 잘립니다. 원본은 앱 작업 기록에 보존됩니다.\n\nGIF: 동작별 재생용 파일입니다. 10ms 시간 단위와 최대 256색(투명 포함) 때문에 PNG/Aseprite와 색·시간 표현이 약간 다를 수 있습니다.\n\nRPG Maker MZ: rpg_maker_mz/$Character.png가 있는 경우 img/characters에 넣으세요. 아래·왼쪽·오른쪽·위 순, 3열×4행의 단일 캐릭터 형식입니다.\n${warnings.join('\n')}\n\n동일 캐릭터 유지와 AI 시트 배치에는 검수가 필요합니다. 고정 팔레트는 내보낼 때 불투명 픽셀의 RGB를 지정 목록으로 제한합니다.\n`);
-  return {zip:zipSync(zip,{level:6}),warnings,files:Object.keys(zip)};
+  return {zip:zipSync(zip,{level:6}),warnings,files:Object.keys(zip),entries:zip};
 }

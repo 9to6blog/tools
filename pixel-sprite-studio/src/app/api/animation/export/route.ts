@@ -3,6 +3,7 @@ import path from 'node:path';
 import { acquire, localRequest, release } from '@/lib/api';
 import { jobDir, readJob } from '@/lib/storage';
 import { exportAnimation, validateClips } from '@/lib/animation-export';
+import { characterExport, validateExportFormat } from '@/lib/character-export';
 import { DEFAULT_SETTINGS, validateSettings, type Job } from '@/lib/types';
 export const runtime='nodejs';
 export async function POST(request:Request){
@@ -10,6 +11,7 @@ export async function POST(request:Request){
   try{
     localRequest(request);if(Number(request.headers.get('content-length'))>1048576)throw new Error('내보내기 설정이 너무 큽니다.');
     const body=await request.json(),clips=validateClips(body.clips);
+    const format=validateExportFormat(body.format,clips,body.frame);
     const palette=validateSettings({...DEFAULT_SETTINGS,palette:body.palette}).palette;
     acquire(`export-${crypto.randomUUID()}`);locked=true;
     const jobs=new Map<string,Job>();
@@ -19,7 +21,8 @@ export async function POST(request:Request){
       if(!file || job.status!=='complete')throw new Error('완료된 프레임을 찾지 못했습니다. 작업 기록에서 다시 선택해 주세요.');
       return readFile(path.join(jobDir(id),file));
     },palette,body.rpgMaker===true);
-    return new Response(new Uint8Array(result.zip),{headers:{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="pixel-animation.zip"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+    const output=characterExport(result,clips,format,body.frame);
+    return new Response(new Uint8Array(output.bytes),{headers:{'Content-Type':output.mime,'Content-Disposition':`attachment; filename="${output.filename}"`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
   }catch(e){return Response.json({error:e instanceof Error?e.message:'내보내지 못했습니다.'},{status:400});}
   finally{if(locked)release();}
 }

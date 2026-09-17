@@ -12,6 +12,10 @@ export const ACTIONS = [
   ['woodcut','벌목','chop wood with an axe, no tree or extra object drawn',6,true], ['mine','채광','swing pickaxe into ground, no rock drawn',6,true],
   ['cast','마법','cast spell with hand gesture and recovery',6,false], ['jump','점프','anticipation, jump upward, descent, landing',6,false],
   ['custom','직접 지정','user-defined action',6,false],
+  ['stand','방향별 모습','neutral standing pose, arms relaxed, full body visible, no action or equipment changes',1,false],
+  ['bow','활쏘기','archery: raise bow, draw string, aim, release arrow, follow-through, recover; preserve bow hand and string hand',8,false],
+  ['fish','낚시','fishing rod cast: prepare, swing rod, cast line, settle into fishing stance; only character, rod and line, no water or scenery',8,false],
+  ['hoe','괭이질','two-handed farming hoe: raise hoe, swing down to till soil, contact, recover; no ground or scenery drawn',6,true],
 ] as const;
 export type MotionSpec = { action: string; direction: string; frames: number; fps: number; loop: boolean; bodyWidth: number; bodyHeight: number; weapon: string; custom: string; phase?: { index: number; total: number } };
 export type AnimationInfo = { name: string; width: number; height: number; fps: number; loop: boolean; frames: string[]; columns: number; palette: string[]; motion?: MotionSpec; warnings?: string[] };
