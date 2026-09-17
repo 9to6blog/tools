@@ -2,6 +2,7 @@ export const SIZES = [16, 32, 48, 64, 128] as const;
 export const SIZE_PRESETS = [8, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 4096] as const;
 export const MAX_EDGE = 4096;
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+export const MAX_REFERENCES = 4;
 export const MODELS = ['gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'] as const;
 export type PixelSettings = {
   size: number; padding: number; colors: number; threshold: number;
@@ -18,8 +19,11 @@ export type Job = {
   settings: PixelSettings; variants: Variant[]; original?: string; error?: string;
   warning?: string; usage?: unknown; requestId?: string; source?: string; apiError?: ApiErrorDetails;
   apiSize?: string;
+  references?: { file: string; name: string }[];
+  referencePrompt?: string;
+  cost?: import('./pricing').Cost;
   animation?: import('./animation-types').AnimationInfo;
-  kind?: 'image' | 'edit' | 'motion' | 'sheet';
+  kind?: 'image' | 'reference' | 'edit' | 'motion' | 'sheet';
 };
 export const DEFAULT_SETTINGS: PixelSettings = { size: 16, padding: 4, colors: 16, threshold: 30, sampling: 'dominant', removeWhite: false, exportSet: 'selected', framing: 'trim' };
 export function dimensions(s: PixelSettings) { return { width: s.width ?? s.size, height: s.height ?? s.size }; }

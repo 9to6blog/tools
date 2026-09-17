@@ -31,6 +31,10 @@ export async function finishJob(job: Job, original: Buffer) {
   job.original = 'original.png'; job.status = 'processing'; await saveJob(job);
   const result = await pixelate(original, job.settings);
   const zip: Record<string, Uint8Array> = { 'original.png': original };
+  for (const reference of job.references ?? []) {
+    if (!/^reference-[1-4]\.png$/.test(reference.file)) throw new Error('레퍼런스 파일명이 올바르지 않습니다.');
+    zip[reference.file] = await readFile(path.join(dir, reference.file));
+  }
   for (const output of result.outputs) {
     const previewFile = output.variant.previewFile ?? `preview-${output.variant.size}.png`;
     await writeFile(path.join(dir, output.variant.file), output.png);

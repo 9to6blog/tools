@@ -20,6 +20,12 @@ npm.cmd run build
 
 설치·빌드 이후에는 위 실행 파일을 더블클릭해 사용할 수 있습니다. 모션·일반 이미지 Aseprite 파일은 앱에서 직접 출력하며, **규격형 타일맵 ZIP**에는 별도로 설치한 Aseprite 실행 파일이 필요합니다. 기본 설치 위치가 다르면 서버 실행 전에 `$env:ASEPRITE_PATH = '설치한 Aseprite 실행 파일의 전체 경로'`를 지정하세요. Godot은 내보낸 프로젝트를 열 때 필요하며, 실제 검증에는 Godot 4.7.2와 Aseprite 1.3.18.5를 사용했습니다.
 
+## 레퍼런스 생성 · 비용 계산
+
+새 이미지 생성에 **레퍼런스 최대 4장**과 참고할 요소 설명을 첨부할 수 있습니다. 생성 버튼을 누를 때만 참조가 전송되며, 참조 파일과 설명은 작업 기록 및 ZIP에 보관합니다.
+
+유료 생성 전에는 같은 조건의 이전 사용량으로 예상액을 표시하고, 기록이 없으면 예상 토큰을 직접 입력해 계산할 수 있습니다. 완료 후에는 API 사용량을 공식 단가로 환산해 작업별 비용과 최근 목록 합계를 보여줍니다. USD 기준이며 캐시 할인 미적용·세금 별도입니다. 사용량이 없는 작업은 미산출로 표시합니다. 자세한 범위와 공식 가격 출처는 [레퍼런스·비용 안내](docs/REFERENCES_AND_COSTS.md)를 확인하세요.
+
 ## 작업 화면
 
 - **API로 새로 생성**: 설명, 모델, 품질, API 키를 설정하고 유료 생성 버튼을 누릅니다. OpenAI 원본 1장을 생성한 뒤 로컬에서 변환합니다. Flare와 Sunburst를 지원합니다.
@@ -56,7 +62,7 @@ npm.cmd run build
 
 ## 저장
 
-`outputs/<작업 ID>/`에 `original.png`, `sprite-N.png` 또는 `sprite-WxH.png`, 대응 `preview-*.png`, `job.json`, `sprites.zip`이 저장됩니다. ZIP에는 N개 결과, N개 미리보기, 원본, metadata.json, README.txt가 들어갑니다. 항목 수는 `2N + 3`입니다.
+`outputs/<작업 ID>/`에 `original.png`, `sprite-N.png` 또는 `sprite-WxH.png`, 대응 `preview-*.png`, `job.json`, `sprites.zip`이 저장됩니다. ZIP에는 N개 결과, N개 미리보기, 원본, metadata.json, README.txt가 들어갑니다. 항목 수는 `2N + 3`이며, 레퍼런스 생성은 참조 PNG R장이 추가되어 `2N + 3 + R`입니다.
 
 API 원본은 반환 PNG를 보관합니다. 업로드 원본은 방향 보정 후 PNG로 재인코딩하므로 업로드 JPEG/WebP의 압축 바이트·메타데이터 전체를 보관하는 것은 아닙니다. 원래 사용자 파일은 수정하지 않습니다. 재변환은 이전 원본에서 새 작업을 만들며 기존 결과를 덮어쓰지 않습니다.
 
@@ -74,7 +80,7 @@ npm.cmd run build
 
 진행 중인 작업이 없는지 확인하고 `stop.ps1`로 서버를 종료한 뒤 다시 빌드합니다. 현재 로컬 PC용이며 Docker나 AWS 서버는 사용하지 않습니다.
 
-- 자동 테스트 26개: 기존 변환 외 팔레트 고정, 시트 분할, GIF·Aseprite·RPG Maker, 타일 묶음, 규격형 타일 연결, 가상 API 참조 요청·중복 방지·오류 진단 보존을 검증합니다. 유료 API를 호출하지 않습니다. 검증 산출물은 각 PC의 `test-artifacts/`에 만들어지며 저장소에는 포함하지 않습니다.
+- 자동 테스트 31개: 기존 변환 외 팔레트 고정, 시트 분할, GIF·Aseprite·RPG Maker, 타일 묶음, 규격형 타일 연결, 가상 API 참조 요청·중복 방지·오류 진단 보존, 다중 레퍼런스 생성과 비용 계산을 검증합니다. 유료 API를 호출하지 않습니다. 검증 산출물은 각 PC의 `test-artifacts/`에 만들어지며 저장소에는 포함하지 않습니다.
 - `node tests/http-animation.mjs`: 무료 시트 가져오기, 애니메이션·타일 ZIP, 기존 사용자 작업 보존을 확인합니다. 유료 API는 호출하지 않으며 생성한 테스트 작업 ID를 보고서에 기록합니다.
 - `node tests/http-expanded.mjs`: 실행 중인 로컬 서버에서 무료 업로드·재변환·직사각형 다운로드·ZIP·기존 기록 보존을 확인합니다. 테스트 작업을 실제 outputs에 만들고 ID를 `test-artifacts/http-expanded-report.json`에 기록합니다. 유료 API는 호출하지 않습니다.
 - 이전 `tests/http-smoke.mjs`는 구버전 5개 출력 검증용입니다. 키 오류 검사는 명시적으로 잘못된 키를 사용해 서버 환경 키가 있어도 유료 생성으로 이어지지 않습니다.

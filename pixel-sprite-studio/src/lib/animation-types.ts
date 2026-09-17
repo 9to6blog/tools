@@ -39,6 +39,16 @@ export function validateMotion(value: unknown, settings: PixelSettings): MotionS
 export function motionLayout(frames: number) {
   const columns = Math.ceil(Math.sqrt(frames)); return { columns, rows: Math.ceil(frames / columns) };
 }
+export function motionApiSize(width: number, height: number, frames: number) {
+  if (![width, height].every(n => Number.isInteger(n) && n >= 1 && n <= 4096) || !Number.isInteger(frames) || frames < 1 || frames > 16) return '';
+  const layout = motionLayout(frames);
+  let cw = Math.max(128, Math.round(512 * width / Math.max(width, height) / 16) * 16);
+  let ch = Math.max(128, Math.round(512 * height / Math.max(width, height) / 16) * 16);
+  while (cw * layout.columns > 3 * ch * layout.rows) ch += 16;
+  while (ch * layout.rows > 3 * cw * layout.columns) cw += 16;
+  while (cw * ch * layout.columns * layout.rows < 655360) { cw += 16; ch += 16; }
+  return `${cw * layout.columns}x${ch * layout.rows}`;
+}
 export function motionPrompt(subject: string, s: PixelSettings, m: MotionSpec) {
   const { columns, rows } = motionLayout(m.frames);
   const description = ACTIONS.find(a => a[0] === m.action)![2];

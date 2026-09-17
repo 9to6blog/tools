@@ -4,8 +4,9 @@ import path from 'node:path';
 import sharp from 'sharp';
 import { acquire, apiErrorDetails, client, localRequest, promptFor, release, safeError } from '@/lib/api';
 import { imageSource } from '@/lib/image-source';
+import { usageCost } from '@/lib/pricing';
 import { artPrompt } from '@/lib/art-options';
-import { motionLayout, motionPrompt, validateMotion } from '@/lib/animation-types';
+import { motionApiSize, motionLayout, motionPrompt, validateMotion } from '@/lib/animation-types';
 import { finishAnimation } from '@/lib/animation';
 import { finishJob, jobDir, readJob, saveJob } from '@/lib/storage';
 import { dimensions, generationSize, MAX_UPLOAD_BYTES, MODELS, validateSettings, type Job } from '@/lib/types';
@@ -28,16 +29,7 @@ export async function POST(request: Request) {
     if(await readJob(id).catch(()=>null)) return Response.json({error:'이미 요청한 작업입니다. 작업 기록을 확인해 주세요.'},{status:409});
     const target=dimensions(settings);
     const layout=motion?motionLayout(motion.frames):undefined;
-    let size:string=generationSize(settings);
-    if(layout) {
-      // Equal source cells, with bounded aspect ratio; all edges are multiples of 16.
-      let cw=Math.max(128,Math.round(512*target.width/Math.max(target.width,target.height)/16)*16);
-      let ch=Math.max(128,Math.round(512*target.height/Math.max(target.width,target.height)/16)*16);
-      while(cw*layout.columns>3*ch*layout.rows) ch+=16;
-      while(ch*layout.rows>3*cw*layout.columns) cw+=16;
-      while(cw*ch*layout.columns*layout.rows<655360) {cw+=16;ch+=16;}
-      size=`${cw*layout.columns}x${ch*layout.rows}`;
-    }
+    const size=motion?motionApiSize(target.width,target.height,motion.frames):generationSize(settings);
     job={id,created:new Date().toISOString(),prompt:motion?`${motion.action}_${motion.direction} · ${prompt}`:prompt,model,quality,kind:motion?'motion':'edit',source:source.source,settings,status:'generating',variants:[],apiSize:size};
     await saveJob(job);
     await mkdir(jobDir(id),{recursive:true}); await writeFile(path.join(jobDir(id),'reference.png'),source.bytes);
@@ -45,8 +37,10 @@ export async function POST(request: Request) {
     // Use the model's default input handling instead of forcing the optional input_fidelity override.
     const {data:response,request_id}=await openai.images.edit({model,image:await toFile(source.bytes,'reference.png',{type:'image/png'}),prompt:motion?motionPrompt(prompt,settings,motion):promptFor(prompt,target.width,settings.colors,target.height)+artPrompt(settings)+'\nEdit the reference image. Preserve identity, outfit, materials and recognizable features while applying the requested camera, facing and pose.',n:1,size,quality:quality as 'low'|'medium'|'high',background:'transparent',output_format:'png'}).withResponse();
     job.requestId=request_id??undefined;
+    job.usage=response.usage; job.cost=usageCost(model,response.usage);
+    await saveJob(job);
     const b64=response.data?.[0]?.b64_json;
-    if(!b64) throw new Error('Missing image'); job.usage=response.usage;
+    if(!b64) throw new Error('Missing image');
     const image=Buffer.from(b64,'base64');
     if(motion && layout) {
       const meta=await sharp(image).metadata();
