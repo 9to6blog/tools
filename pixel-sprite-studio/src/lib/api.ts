@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import type { ApiErrorDetails } from './types';
+import { readStoredApiKey, validateApiKey } from './windows-credential';
 export function localRequest(request: Request) {
   // Next may normalize request.url to its internal listener URL. Validate the
   // actual Host and browser Origin instead, without trusting forwarded headers.
@@ -9,9 +10,15 @@ export function localRequest(request: Request) {
   if (origin && origin !== `http://${host}`) throw new Error('다른 사이트에서 보낸 요청은 허용되지 않습니다.');
   if (request.headers.get('x-pixel-studio') !== '1') throw new Error('스튜디오 화면에서 요청해 주세요.');
 }
-export function client(key: unknown) {
-  const apiKey = (typeof key === 'string' ? key.trim() : '') || process.env.OPENAI_API_KEY;
-  if (!apiKey || !apiKey.startsWith('sk-') || apiKey.length < 20 || apiKey.length > 512) throw new Error('OpenAI API 키를 입력해 주세요.');
+export async function client(key?: unknown) {
+  const provided = typeof key === 'string' ? key.trim() : '';
+  let apiKey = provided;
+  if (!apiKey && process.platform === 'win32') {
+    try { apiKey = await readStoredApiKey(); }
+    catch (error) { if (!process.env.OPENAI_API_KEY) throw error; }
+  }
+  if (!apiKey) apiKey = process.env.OPENAI_API_KEY ?? '';
+  apiKey = validateApiKey(apiKey);
   return new OpenAI({ apiKey, maxRetries: 0, timeout: 240_000 });
 }
 const runtime = globalThis as typeof globalThis & { pixelStudioActive?: string };

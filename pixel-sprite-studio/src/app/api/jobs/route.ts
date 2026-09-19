@@ -12,7 +12,7 @@ import { tilePrompt, validateTiles } from '@/lib/tiles';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export async function GET() {
-  return NextResponse.json({ jobs: await listJobs(), active: activeJob() ?? null, hasKey: !!process.env.OPENAI_API_KEY }, { headers: { 'Cache-Control': 'no-store' } });
+  return NextResponse.json({ jobs: await listJobs(), active: activeJob() ?? null }, { headers: { 'Cache-Control': 'no-store' } });
 }
 export async function POST(request: Request) {
   let input, settings, openai, tiles;
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     if (!/^[a-f0-9-]{36}$/.test(input.id ?? '')) throw new Error('작업 ID가 올바르지 않습니다.');
     if (typeof input.prompt !== 'string' || !input.prompt.trim() || input.prompt.length > 4000) throw new Error('그릴 내용을 1~4,000자로 입력해 주세요.');
     if (!MODELS.includes(input.model) || !['low', 'medium', 'high'].includes(input.quality)) throw new Error('모델과 품질 설정을 확인해 주세요.');
-    openai = client(input.apiKey);
+    openai = await client(input.apiKey);
   } catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : '요청을 확인해 주세요.' }, { status: 400 }); }
   try { acquire(input.id); } catch { return NextResponse.json({ error: '이미 처리 중인 작업이 있습니다.', active: activeJob() }, { status: 409 }); }
   let job: Job | undefined;

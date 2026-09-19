@@ -7,7 +7,7 @@ New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
 $healthy = $false
 try {
     $status = Invoke-RestMethod "$studioUrl/api/jobs" -TimeoutSec 2
-    $healthy = ($null -ne $status.jobs -and $null -ne $status.hasKey)
+    $healthy = ($null -ne $status.jobs)
 } catch {}
 if (-not $healthy) {
     if (Get-NetTCPConnection -LocalPort 3216 -State Listen -ErrorAction SilentlyContinue) { throw 'Port 3216 is in use by another application.' }

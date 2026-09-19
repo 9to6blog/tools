@@ -1,18 +1,42 @@
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { zipSync, strToU8 } from 'fflate';
 import { pixelate } from './pixel';
 import type { Job } from './types';
 export const OUTPUTS = path.join(process.cwd(), 'outputs');
+const storageRuntime = globalThis as typeof globalThis & { pixelStudioSaveQueues?: Map<string, Promise<void>> };
+const saveQueues = storageRuntime.pixelStudioSaveQueues ??= new Map<string, Promise<void>>();
 export function jobDir(id: string) {
   if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error('올바르지 않은 작업 ID입니다.');
   return path.join(OUTPUTS, id);
 }
 export async function saveJob(job: Job) {
-  const dir = jobDir(job.id); await mkdir(dir, { recursive: true });
-  const tmp = path.join(dir, 'job.tmp');
-  await writeFile(tmp, JSON.stringify(job, null, 2));
-  await rename(tmp, path.join(dir, 'job.json'));
+  const id = job.id;
+  const payload = JSON.stringify(job, null, 2);
+  const previous = saveQueues.get(id) ?? Promise.resolve();
+  const current = previous.catch(() => {}).then(async () => {
+    const dir = jobDir(id); await mkdir(dir, { recursive: true });
+    const tmp = path.join(dir, `job.${process.pid}.${randomUUID()}.tmp`);
+    const destination = path.join(dir, 'job.json');
+    try {
+      await writeFile(tmp, payload, { flag: 'wx' });
+      for (let attempt = 0; ; attempt++) {
+        try { await rename(tmp, destination); break; }
+        catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (!['EPERM', 'EACCES', 'EBUSY'].includes(code ?? '') || attempt >= 6) throw error;
+          await new Promise(resolve => setTimeout(resolve, 25 * 2 ** attempt));
+        }
+      }
+    } catch (error) {
+      await unlink(tmp).catch(() => {});
+      throw error;
+    }
+  });
+  saveQueues.set(id, current);
+  try { await current; }
+  finally { if (saveQueues.get(id) === current) saveQueues.delete(id); }
 }
 export async function readJob(id: string): Promise<Job> { return JSON.parse(await readFile(path.join(jobDir(id), 'job.json'), 'utf8')); }
 export async function listJobs(): Promise<Job[]> {

@@ -17,7 +17,7 @@ import { PrimaryActionProvider, HeaderPrimaryAction, usePrimaryAction } from '@/
 import { useWorkspaceDraft, DraftStatus } from '@/components/use-workspace-draft';
 import { motionApiSize } from '@/lib/animation-types';
 import { OutputPresets } from '@/components/output-presets';
-import { loadApiKey, removeApiKey, saveApiKey } from '@/lib/browser-api-key';
+import { clearLegacyBrowserApiKey } from '@/lib/legacy-api-key';
 import { DEFAULT_SETTINGS, MAX_EDGE, MAX_UPLOAD_BYTES, MODELS, dimensions, generationSize, validateSettings, variantDimensions, type Job, type PixelSettings, type Variant } from '@/lib/types';
 
 const asset = (id: string, file: string, download = false) => `/api/assets/${id}/${file}${download ? '?download=1' : ''}`;
@@ -46,6 +46,7 @@ function StudioWorkspace() {
   const [model, setModel] = useState<string>(MODELS[0]);
   const [quality, setQuality] = useState('medium');
   const [hasKey, setHasKey] = useState(false);
+  const [hasStoredKey, setHasStoredKey] = useState(false);
   const [keyOpen, setKeyOpen] = useState(true);
   const [keyStatus, setKeyStatus] = useState('');
   const [checking, setChecking] = useState(false);
@@ -100,7 +101,7 @@ function StudioWorkspace() {
       const response = await fetch('/api/jobs', { cache: 'no-store' });
       if (!response.ok) return;
       const data = await response.json();
-      setJobs(data.jobs); setActive(data.active); setHasKey(data.hasKey);
+      setJobs(data.jobs); setActive(data.active);
       if (!initialized.current) {
         initialized.current = true;
         const initial: Job | undefined = data.jobs.find((j: Job) => j.status === 'complete' && !j.animation);
@@ -111,17 +112,22 @@ function StudioWorkspace() {
       }
     } catch { /* Keep the current result on polling failure. */ }
   }, []);
+  const refreshKeyStatus = useCallback(async () => {
+    try {
+      const response = await fetch('/api/key', { cache: 'no-store', headers: { 'X-Pixel-Studio': '1' } });
+      if (!response.ok) return;
+      const data = await response.json();
+      setHasKey(Boolean(data.hasKey)); setHasStoredKey(Boolean(data.hasStoredKey));
+    } catch { /* Key status does not block local-only tools. */ }
+  }, []);
   useEffect(() => {
     const initial = setTimeout(refresh, 0), timer = setInterval(refresh, 4000);
     return () => { clearTimeout(initial); clearInterval(timer); };
   }, [refresh]);
+  useEffect(() => { const timer = setTimeout(refreshKeyStatus, 0); return () => clearTimeout(timer); }, [refreshKeyStatus]);
   useEffect(() => {
     const timer = setTimeout(() => {
-      const savedApiKey = loadApiKey(localStorage);
-      if (savedApiKey) {
-        setApiKeyState(savedApiKey);
-        setKeyStatus('브라우저에 저장된 API 키를 불러왔습니다.');
-      }
+      clearLegacyBrowserApiKey(localStorage);
     }, 0);
     return () => clearTimeout(timer);
   }, []);
@@ -147,25 +153,34 @@ function StudioWorkspace() {
   }
   function setApiKey(value: string) {
     setApiKeyState(value);
-    setKeyStatus(saveApiKey(localStorage, value) ? '' : 'API 키를 입력했지만 브라우저에 저장하지 못했습니다.');
+    setKeyStatus('');
   }
-  function clearApiKey() {
-    setApiKeyState('');
-    setKeyStatus(removeApiKey(localStorage) ? '브라우저에 저장된 API 키를 삭제했습니다.' : '브라우저 저장소에서 API 키를 삭제하지 못했습니다.');
+  async function clearApiKey() {
+    setChecking(true); setKeyStatus('');
+    try {
+      const r = await fetch('/api/key', { method: 'DELETE', headers: { 'X-Pixel-Studio': '1' } });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'API 키를 삭제하지 못했습니다.');
+      setApiKeyState(''); setHasStoredKey(false); setHasKey(Boolean(data.hasKey)); setKeyStatus(data.message); await refreshKeyStatus();
+    } catch (e) { setKeyStatus(e instanceof Error ? e.message : 'API 키를 삭제하지 못했습니다.'); }
+    finally { setChecking(false); }
   }
   async function checkKey() {
     setChecking(true); setKeyStatus('');
     try {
       const r = await fetch('/api/key', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Pixel-Studio': '1' }, body: JSON.stringify({ apiKey, model }) });
-      const data = await r.json(); setKeyStatus(data.message || data.error);
-    } catch { setKeyStatus('연결을 확인하지 못했습니다. 로컬 서버 상태를 확인해 주세요.'); }
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'API 키를 확인하지 못했습니다.');
+      if (apiKey.trim()) { setApiKeyState(''); setHasStoredKey(true); setHasKey(true); }
+      setKeyStatus(data.message); await Promise.all([refresh(), refreshKeyStatus()]);
+    } catch (e) { setKeyStatus(e instanceof Error ? e.message : '연결을 확인하지 못했습니다. 로컬 서버 상태를 확인해 주세요.'); }
     finally { setChecking(false); }
   }
   async function run(action: 'generate' | 'upload' | 'reprocess' | 'edit') {
     if (requestLock.current || busy) return;
     let validated: PixelSettings;
     try { validated = validateSettings(settings); } catch (e) { setError((e as Error).message); return; }
-    if ((action === 'generate' || action === 'edit') && !apiKey.trim() && !hasKey) { setKeyOpen(true); setError('OpenAI API 키를 입력해 주세요.'); return; }
+    if ((action === 'generate' || action === 'edit') && !hasKey) { setKeyOpen(true); setError('OpenAI API 키를 확인·저장해 주세요.'); return; }
     if ((action === 'upload' || action === 'edit') && !file) { setError('먼저 내 컴퓨터에서 이미지 파일을 선택해 주세요.'); return; }
     if (action === 'reprocess' && !job?.original) { setError('먼저 원본이 저장된 작업을 선택해 주세요.'); return; }
     const sourceId = job?.id;
@@ -178,13 +193,13 @@ function StudioWorkspace() {
       const headers: Record<string, string> = { 'X-Pixel-Studio': '1' };
       if (action === 'generate') {
         if (references.length) {
-          body = new FormData(); body.set('id', id); body.set('prompt', prompt); body.set('model', model); body.set('quality', quality); body.set('settings', JSON.stringify(validated)); body.set('apiKey', apiKey); body.set('referencePrompt', referencePrompt);
+          body = new FormData(); body.set('id', id); body.set('prompt', prompt); body.set('model', model); body.set('quality', quality); body.set('settings', JSON.stringify(validated)); body.set('referencePrompt', referencePrompt);
           references.forEach(file => (body as FormData).append('references', file));
-        } else { headers['Content-Type'] = 'application/json'; body = JSON.stringify({ id, prompt, model, quality, settings: validated, apiKey }); }
+        } else { headers['Content-Type'] = 'application/json'; body = JSON.stringify({ id, prompt, model, quality, settings: validated }); }
       } else {
         body = new FormData(); body.set('id', id); body.set('settings', JSON.stringify(validated));
         if (action === 'upload' || action === 'edit') body.set('image', file!); else body.set('sourceId', sourceId!);
-        if (action === 'edit') { body.set('apiKey', apiKey); body.set('model', model); body.set('quality', quality); body.set('prompt', editPrompt); }
+        if (action === 'edit') { body.set('model', model); body.set('quality', quality); body.set('prompt', editPrompt); }
       }
       const response = await fetch(action === 'generate' ? '/api/jobs' : action === 'edit' ? '/api/edit' : '/api/convert', { method: 'POST', headers, body });
       const result = await response.json();
@@ -232,7 +247,7 @@ function StudioWorkspace() {
       </div>
       <DraftStatus {...draft}/>
       <ArtControls settings={settings} onChange={setSettings} disabled={busy} file={mode === 'upload' ? file : null} sourceId={job?.id} sourceFile={variant?.file}/>
-      <div hidden={mode !== 'character'}><CharacterStudio active={mode === 'character'} jobs={jobs} settings={settings} apiKey={apiKey} setApiKey={setApiKey} clearApiKey={clearApiKey} apiKeyStatus={keyStatus} hasKey={hasKey} model={model} setModel={setModel} quality={quality} setQuality={setQuality} refresh={refresh} serverBusy={!draft.ready || working || !!active} onBusy={setExtraWorking}/></div>
+      <div hidden={mode !== 'character'}><CharacterStudio active={mode === 'character'} jobs={jobs} settings={settings} apiKey={apiKey} setApiKey={setApiKey} saveApiKey={checkKey} clearApiKey={clearApiKey} apiKeyStatus={keyStatus} checkingApiKey={checking} hasKey={hasKey} hasStoredKey={hasStoredKey} model={model} setModel={setModel} quality={quality} setQuality={setQuality} refresh={refresh} serverBusy={!draft.ready || working || !!active} onBusy={setExtraWorking}/></div>
       <div hidden={mode === 'character'}>
       <div className="workspace">
         <aside className="control-panel"><div className="panel-title">{mode === 'generate' ? <Sparkles size={17} /> : <ImagePlus size={17} />}<h2>{mode === 'generate' ? '새 그림 생성하기' : '로컬 파일 변환하기'}</h2><span>{mode === 'generate' ? 'API' : 'LOCAL'}</span></div>
@@ -254,7 +269,7 @@ function StudioWorkspace() {
             <div className="field-pair model-fields"><div className="field"><Label htmlFor="model">AI 작업 모델</Label><select id="model" value={model} onChange={e => { setModel(e.target.value); setKeyStatus(''); }}><option value={MODELS[0]}>2.5 Flare</option><option value={MODELS[1]}>2.5 Sunburst</option></select></div><div className="field"><Label htmlFor="quality">생성 품질</Label><select id="quality" value={quality} onChange={e => setQuality(e.target.value)}><option value="low">빠른 초안</option><option value="medium">표준</option><option value="high">높음</option></select></div></div><p className="help source-note">API 원본: {generationSize(settings).replace('x', ' × ')}px. 무료 변환에는 AI 설정이 적용되지 않습니다.</p>
             <details className="advanced"><summary>픽셀 변환 설정 <ChevronDown size={14} /></summary><div className="advanced-body"><div className="field"><Label htmlFor="framing">변환할 원본 영역</Label><select id="framing" value={settings.framing ?? 'trim'} onChange={e => update('framing', e.target.value as PixelSettings['framing'])}><option value="trim">투명 여백을 잘라 그림 중심으로 맞춤</option><option value="canvas">원본 캔버스와 내부 배치 유지</option></select></div><div className="field"><Label htmlFor="sampling">픽셀 선택 방식</Label><select id="sampling" value={settings.sampling} onChange={e => update('sampling', e.target.value as PixelSettings['sampling'])}><option value="dominant">셀 안의 대표 색상</option><option value="nearest">중앙 픽셀 선택 (기존 도트 이미지)</option></select></div><div className="field"><Label htmlFor="threshold">실루엣 유지 기준 <span className="mono">{settings.threshold}%</span></Label><input id="threshold" type="range" min={1} max={99} disabled={settings.sampling === 'nearest'} value={settings.threshold} onChange={e => update('threshold', Number(e.target.value))} /><p className="help">대표 색상 방식에만 적용됩니다. 낮추면 얇은 외곽을 더 남깁니다.</p></div><label className="checkbox-label"><input type="checkbox" checked={settings.removeWhite} onChange={e => update('removeWhite', e.target.checked)} /> 가장자리에 연결된 흰 배경 제거</label></div></details>
           </fieldset>
-          {(mode === 'generate' || mode === 'upload') && <div className="key-section"><button className="key-toggle" onClick={() => setKeyOpen(!keyOpen)}><span><KeyRound size={14} /> OpenAI API 키</span><span className="key-tag">{apiKey || hasKey ? '입력됨' : '연결 필요'}<ChevronDown size={13} /></span></button>{keyOpen && <div className="key-body"><Label htmlFor="apiKey" className="sr-only">OpenAI API 키</Label><div className="key-input-row"><Input id="apiKey" type="password" autoComplete="off" spellCheck={false} maxLength={512} placeholder={hasKey ? '환경 변수의 키 사용 중' : 'sk-…'} value={apiKey} onChange={e => setApiKey(e.target.value)} disabled={busy} /><Button size="sm" variant="outline" onClick={checkKey} disabled={checking || busy || (!apiKey && !hasKey)}>{checking ? <LoaderCircle className="spin" size={14} /> : '확인'}</Button><Button className="key-clear" size="sm" variant="ghost" onClick={clearApiKey} disabled={busy || !apiKey} aria-label="브라우저에 저장된 API 키 삭제"><Trash2 size={14} /> 삭제</Button></div><p className="help">이 브라우저의 localStorage에 저장됩니다. 공용 PC에서는 사용하지 말고, 필요 없을 때 삭제하세요.</p>{keyStatus && <p className="key-status" role="status">{keyStatus}</p>}</div>}</div>}
+          {(mode === 'generate' || mode === 'upload') && <div className="key-section"><button className="key-toggle" onClick={() => setKeyOpen(!keyOpen)}><span><KeyRound size={14} /> OpenAI API 키</span><span className="key-tag">{hasStoredKey ? 'Windows 저장됨' : hasKey ? '환경 변수' : '연결 필요'}<ChevronDown size={13} /></span></button>{keyOpen && <div className="key-body"><Label htmlFor="apiKey" className="sr-only">OpenAI API 키</Label><div className="key-input-row"><Input id="apiKey" type="password" autoComplete="off" spellCheck={false} maxLength={512} placeholder={hasKey ? '저장된 키를 사용 중' : 'sk-…'} value={apiKey} onChange={e => setApiKey(e.target.value)} disabled={busy || checking} /><Button size="sm" variant="outline" onClick={checkKey} disabled={checking || busy || (!apiKey && !hasKey)}>{checking ? <LoaderCircle className="spin" size={14} /> : apiKey ? '확인·저장' : '확인'}</Button><Button className="key-clear" size="sm" variant="ghost" onClick={clearApiKey} disabled={checking || busy || (!apiKey && !hasStoredKey)} aria-label="Windows 자격 증명 관리자에서 API 키 삭제"><Trash2 size={14} /> 삭제</Button></div><p className="help">확인·저장 시 현재 Windows 사용자의 자격 증명 관리자에 보관합니다. 브라우저 저장소·작업 파일에는 저장하지 않습니다.</p>{keyStatus && <p className="key-status" role="status">{keyStatus}</p>}</div>}</div>}
           {mode === 'generate' && <div className="generation-cost"><CostEstimate jobs={jobs} requests={[{ model, quality, apiSize: generationSize(settings), kind: references.length ? 'reference' : 'image', referenceCount: references.length }]} /></div>}
           <div className="generate-area"><Button className="generate-button" onClick={() => run(mode === 'generate' ? 'generate' : 'upload')} disabled={busy || readingFile || (mode === 'generate' ? !prompt.trim() : !file)}>{busy ? <LoaderCircle size={17} className="spin" /> : mode === 'generate' ? <Sparkles size={17} /> : <ImagePlus size={17} />}{busy ? '작업 진행 중' : mode === 'generate' ? references.length ? `레퍼런스 ${references.length}장으로 새 이미지 생성` : 'API로 새 이미지 생성' : '선택한 로컬 이미지 변환'}{!busy && <ArrowRight size={17} />}</Button><p>{mode === 'generate' ? '이미지 1장 생성 · OpenAI API 요금 발생' : '내 PC에서 변환 · API 호출 없음 · 무료'}</p>{error && <div role="alert" className="message error">{error}</div>}</div>
           {mode === 'upload' && <div className="ai-edit-box"><Label htmlFor="editPrompt">AI로 시점·자세 변경</Label><Textarea id="editPrompt" value={editPrompt} maxLength={4000} onChange={e=>setEditPrompt(e.target.value)} disabled={busy}/><p className="help">원본의 몸 크기와 위치를 기준으로 자세를 변경합니다. 크기 기준 칸을 함께 생성한 뒤 결과 1장만 저장합니다. API 1회 요금이 발생합니다.</p><CostEstimate jobs={jobs} requests={[{ model, quality, apiSize: motionApiSize(target.width,target.height,1,true), kind: 'edit', referenceCount: 1 }]} /><Button variant="outline" disabled={busy || !file || !editPrompt.trim()} onClick={()=>run('edit')}>선택 이미지 시점·자세 변경 · 유료</Button></div>}

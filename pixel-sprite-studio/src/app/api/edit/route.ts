@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     const prompt=String(form.get('prompt')||'Preserve this character and its design.').trim();
     if(prompt.length>4000) throw new Error('설명은 4,000자 이하로 입력해 주세요.');
     const motion=form.get('motion')?validateMotion(JSON.parse(String(form.get('motion'))),settings):undefined;
-    const source=await imageSource(form); const openai=client(form.get('apiKey'));
+    const source=await imageSource(form); const openai=await client(form.get('apiKey'));
     requestKey=openai.apiKey??'';
     acquire(id); locked=true;
     if(await readJob(id).catch(()=>null)) return Response.json({error:'이미 요청한 작업입니다. 작업 기록을 확인해 주세요.'},{status:409});

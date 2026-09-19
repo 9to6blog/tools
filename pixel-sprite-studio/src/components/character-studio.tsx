@@ -15,7 +15,7 @@ import type { CharacterExportFormat } from '@/lib/character-export';
 import { MAX_UPLOAD_BYTES, MODELS, primaryVariant, type Job, type PixelSettings } from '@/lib/types';
 import { Trash2 } from 'lucide-react';
 
-type Props = { active: boolean; jobs: Job[]; settings: PixelSettings; apiKey: string; setApiKey: (s: string) => void; clearApiKey: () => void; apiKeyStatus: string; hasKey: boolean; model: string; setModel: (s: string) => void; quality: string; setQuality: (s: string) => void; refresh: () => Promise<void>; serverBusy: boolean; onBusy: (b: boolean) => void };
+type Props = { active: boolean; jobs: Job[]; settings: PixelSettings; apiKey: string; setApiKey: (s: string) => void; saveApiKey: () => Promise<void>; clearApiKey: () => Promise<void>; apiKeyStatus: string; checkingApiKey: boolean; hasKey: boolean; hasStoredKey: boolean; model: string; setModel: (s: string) => void; quality: string; setQuality: (s: string) => void; refresh: () => Promise<void>; serverBusy: boolean; onBusy: (b: boolean) => void };
 const asset = (id: string, file: string) => `/api/assets/${id}/${file}`;
 const frameFile = (jobs: Job[], f: FrameRef) => { const j = jobs.find(j => j.id === f.jobId); return j?.animation?.frames[f.index] ?? j?.variants[f.index]?.file ?? `frame-${f.index}.png`; };
 export function CharacterStudio(p: Props) {
@@ -73,7 +73,7 @@ export function CharacterStudio(p: Props) {
     let done = 0;
     try {
       if (!refFile && !sourceId) throw new Error('정면 이미지를 먼저 선택해 주세요.');
-      if (!p.apiKey.trim() && !p.hasKey) throw new Error('OpenAI API 키를 입력해 주세요.');
+      if (!p.hasKey) throw new Error('OpenAI API 키를 확인·저장해 주세요.');
       // Validate the entire batch before the first paid request.
       const plan = characterPlan(p.settings, width, height, bodyWidth, bodyHeight, views, rows);
       let palette = p.settings.palette;
@@ -82,7 +82,7 @@ export function CharacterStudio(p: Props) {
         setProgress(`${done + 1} / ${plan.motions.length} · ${characterClipLabel(`${motion.action}_${motion.direction}`)} 생성 중`);
         const form = new FormData();
         if (refFile) form.set('image', refFile); else { const source = p.jobs.find(j => j.id === sourceId); form.set('sourceId', sourceId); form.set('sourceFile', source?.animation?.frames[0] ?? (source ? primaryVariant(source)?.file : undefined) ?? 'original.png'); }
-        form.set('id', crypto.randomUUID()); form.set('apiKey', p.apiKey); form.set('model', p.model); form.set('quality', p.quality); form.set('prompt', `The supplied reference shows the FRONT of this character. Preserve identity and proportions. ${subject}`);
+        form.set('id', crypto.randomUUID()); form.set('model', p.model); form.set('quality', p.quality); form.set('prompt', `The supplied reference shows the FRONT of this character. Preserve identity and proportions. ${subject}`);
         form.set('settings', JSON.stringify({ ...plan.settings, palette })); form.set('motion', JSON.stringify(motion));
         const response = await fetch('/api/edit', { method: 'POST', headers: { 'X-Pixel-Studio': '1' }, body: form }), data = await response.json();
         if (!response.ok) throw new Error(data.error || '생성하지 못했습니다.');
@@ -117,7 +117,7 @@ export function CharacterStudio(p: Props) {
       <div className="field-pair"><div className="field"><Label htmlFor="characterWidth">프레임 가로 px</Label><Input id="characterWidth" type="number" min={1} max={4096} value={width} onChange={e=>setWidth(Number(e.target.value))}/></div><div className="field"><Label htmlFor="characterHeight">프레임 세로 px</Label><Input id="characterHeight" type="number" min={1} max={4096} value={height} onChange={e=>setHeight(Number(e.target.value))}/></div></div>
       <div className="field-pair"><div className="field"><Label htmlFor="bodyWidth">몸 가로 px</Label><Input id="bodyWidth" type="number" min={1} max={width} value={bodyWidth} onChange={e=>setBodyWidth(Number(e.target.value))}/></div><div className="field"><Label htmlFor="bodyHeight">몸 세로 px</Label><Input id="bodyHeight" type="number" min={1} max={height} value={bodyHeight} onChange={e=>setBodyHeight(Number(e.target.value))}/></div></div><p className="help">원본의 투명 여백을 제외한 크기를 자동 측정합니다. 생성 기준 이미지를 배치하고, 결과의 기준 칸으로 시트 전체에 같은 배율을 적용합니다. 도구가 뻗는 영역은 몸 크기로 계산하지 않습니다.</p>
       <div className="field-pair"><div className="field"><Label htmlFor="characterModel">모델</Label><select id="characterModel" value={p.model} onChange={e=>p.setModel(e.target.value)}>{MODELS.map(m=><option key={m}>{m}</option>)}</select></div><div className="field"><Label htmlFor="characterQuality">품질</Label><select id="characterQuality" value={p.quality} onChange={e=>p.setQuality(e.target.value)}><option value="low">빠르게</option><option value="medium">균형</option><option value="high">고품질</option></select></div></div>
-      <div className="field"><Label htmlFor="characterKey">OpenAI API 키</Label><div className="key-input-row"><Input id="characterKey" type="password" autoComplete="off" spellCheck={false} maxLength={512} value={p.apiKey} placeholder={p.hasKey?'환경 변수 키 사용':'sk-…'} onChange={e=>p.setApiKey(e.target.value)}/><Button className="key-clear" type="button" size="sm" variant="ghost" onClick={p.clearApiKey} disabled={!p.apiKey} aria-label="브라우저에 저장된 API 키 삭제"><Trash2 size={14}/> 삭제</Button></div><p className="help">이 브라우저의 localStorage에 저장됩니다. 공용 PC에서는 사용하지 말고, 필요 없을 때 삭제하세요. 생성 버튼을 누를 때 요금이 발생합니다.</p>{p.apiKeyStatus&&<p className="key-status" role="status">{p.apiKeyStatus}</p>}</div>
+      <div className="field"><Label htmlFor="characterKey">OpenAI API 키 <span>{p.hasStoredKey?'Windows 저장됨':p.hasKey?'환경 변수':'연결 필요'}</span></Label><div className="key-input-row"><Input id="characterKey" type="password" autoComplete="off" spellCheck={false} maxLength={512} value={p.apiKey} placeholder={p.hasKey?'저장된 키를 사용 중':'sk-…'} disabled={p.checkingApiKey} onChange={e=>p.setApiKey(e.target.value)}/><Button type="button" size="sm" variant="outline" onClick={p.saveApiKey} disabled={p.checkingApiKey||(!p.apiKey&&!p.hasKey)}>{p.checkingApiKey?'처리 중':p.apiKey?'확인·저장':'확인'}</Button><Button className="key-clear" type="button" size="sm" variant="ghost" onClick={p.clearApiKey} disabled={p.checkingApiKey||(!p.apiKey&&!p.hasStoredKey)} aria-label="Windows 자격 증명 관리자에서 API 키 삭제"><Trash2 size={14}/> 삭제</Button></div><p className="help">확인·저장 시 현재 Windows 사용자의 자격 증명 관리자에 보관합니다. 브라우저 저장소·작업 파일에는 저장하지 않습니다. 생성 버튼을 누를 때 요금이 발생합니다.</p>{p.apiKeyStatus&&<p className="key-status" role="status">{p.apiKeyStatus}</p>}</div>
     </fieldset></div></section>
     <section className="control-panel character-selection"><div className="panel-title"><h2>2. 모습 · 동작 선택</h2><span>1~16 FRAMES</span></div><div className="animation-controls"><fieldset disabled={disabled}>
       <div className="character-section-heading"><h3>좌·우·뒷모습</h3><span>방향당 정지 이미지 1장</span></div>
